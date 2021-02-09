@@ -1,2 +1,2 @@
-use_gpu,hifi_gan
-False,False
+use_gpu,vocoder,hifi_gan
+True,qnd,False
