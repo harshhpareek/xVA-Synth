@@ -11,7 +11,7 @@ const {xVAAppLogger} = require("./appLogger.js")
 const {saveUserSettings} = require("./settingsMenu.js")
 
 let themeColour
-window.appVersion = "v1.1.1"
+window.appVersion = "v1.2.0"
 window.appLogger = new xVAAppLogger(`./app.log`, window.appVersion)
 const oldCError = console.error
 console.error = (data) => {
@@ -211,14 +211,17 @@ const changeGame = () => {
                 vocoder_select.appendChild(option)
             } else {
                 bespoke_hifi_bolt.style.opacity = 0
+                // Set the vocoder select to quick-and-dirty if bespoke hifi-gan was selected
+                if (vocoder_select.value.includes(".hg.")) {
+                    vocoder_select.value = "qnd"
+                    changeVocoder("qnd")
+                }
                 // Remove the bespoke hifi option if there was one already there
                 Array.from(vocoder_select.children).forEach(opt => {
                     if (opt.innerHTML=="Bespoke HiFi GAN") {
                         vocoder_select.removeChild(opt)
                     }
                 })
-                vocoder_select.value = "qnd"
-                changeVocoder("qnd")
             }
 
             const appVersionRequirement = model.version.toString().split(".").map(v=>parseInt(v))
@@ -546,7 +549,8 @@ const saveFile = (from, to) => {
             hz: window.userSettings.audio.hz,
             padStart: window.userSettings.audio.padStart,
             padEnd: window.userSettings.audio.padEnd,
-            bit_depth: window.userSettings.audio.bitdepth
+            bit_depth: window.userSettings.audio.bitdepth,
+            amplitude: window.userSettings.audio.amplitude
         }
 
         window.appLogger.log(`About to save file from ${from} to ${to} with options: ${JSON.stringify(options)}`)
@@ -596,7 +600,7 @@ const keepSampleFunction = shiftClick => {
         toLocation[toLocation.length-1] = toLocation[toLocation.length-1].replace(/[\/\\:\*?<>"|]*/g, "")
         toLocation = toLocation.join("/")
 
-        const outFolder = toLocation.split("/").reverse().slice(1, 100).reverse().join("/")
+        const outFolder = toLocation.split("/").reverse().slice(2, 100).reverse().join("/")
         if (!fs.existsSync(outFolder)) {
             return void window.errorModal(`The output directory does not exist:<br><br><i>${outFolder}</i><br><br>You can change this in the settings.`)
         }
@@ -617,45 +621,49 @@ const keepSampleFunction = shiftClick => {
                 let outDir = toLocationOut
                 outDir.shift()
 
-                const existingFiles = fs.readdirSync(outDir.reverse().join("/"))
                 newFileName = (newFileName.replace(`.${window.userSettings.audio.format}`, "") + `.${window.userSettings.audio.format}`).replace(/[\/\\:\*?<>"|]*/g, "")
-                const existingFileConflict = existingFiles.filter(name => name==newFileName)
-
+                toLocationOut.reverse()
                 toLocationOut.push(newFileName)
 
-                const finalOutLocation = toLocationOut.join("/")
+                if (fs.existsSync(outDir)) {
+                    const existingFiles = fs.readdirSync(outDir.reverse().join("/"))
+                    const existingFileConflict = existingFiles.filter(name => name==newFileName)
 
-                if (existingFileConflict.length) {
-                    // Remove the entry from the output files' preview
-                    Array.from(voiceSamples.querySelectorAll("div.sample")).forEach(sampleElem => {
-                        const source = sampleElem.querySelector("source")
-                        let sourceSrc = source.src.split("%20").join(" ").replace("file:///", "")
-                        sourceSrc = sourceSrc.split("/").reverse()
-                        const finalFileName = finalOutLocation.split("/").reverse()
 
-                        if (sourceSrc[0] == finalFileName[0]) {
-                            sampleElem.parentNode.removeChild(sampleElem)
-                        }
-                    })
+                    const finalOutLocation = toLocationOut.join("/")
 
-                    // Remove the old file and write the new one in
-                    fs.unlink(finalOutLocation, err => {
-                        if (err) {
-                            console.log(err)
-                            window.appLogger.log(err)
-                        }
-                        console.log(fromLocation, "finalOutLocation", finalOutLocation)
-                        saveFile(fromLocation, finalOutLocation)
-                    })
+                    if (existingFileConflict.length) {
+                        // Remove the entry from the output files' preview
+                        Array.from(voiceSamples.querySelectorAll("div.sample")).forEach(sampleElem => {
+                            const source = sampleElem.querySelector("source")
+                            let sourceSrc = source.src.split("%20").join(" ").replace("file:///", "")
+                            sourceSrc = sourceSrc.split("/").reverse()
+                            const finalFileName = finalOutLocation.split("/").reverse()
 
-                } else {
-                    saveFile(fromLocation, toLocationOut.join("/"))
+                            if (sourceSrc[0] == finalFileName[0]) {
+                                sampleElem.parentNode.removeChild(sampleElem)
+                            }
+                        })
+
+                        // Remove the old file and write the new one in
+                        fs.unlink(finalOutLocation, err => {
+                            if (err) {
+                                console.log(err)
+                                window.appLogger.log(err)
+                            }
+                            console.log(fromLocation, "finalOutLocation", finalOutLocation)
+                            saveFile(fromLocation, finalOutLocation)
+                        })
+                        return
+                    } else {
+                        saveFile(fromLocation, toLocationOut.join("/"))
+                        return
+                    }
                 }
+                saveFile(fromLocation, toLocationOut.join("/"))
             })
 
         } else {
-            console.log("fromLocation", fromLocation)
-            console.log("toLocation", toLocation)
             saveFile(fromLocation, toLocation)
         }
     }
@@ -966,54 +974,52 @@ const setPitchEditorValues = (letters, pitchOrig, lengthsOrig, isFreshRegen) => 
 
         set_letter_display(letterDiv, l, length, pitchOrig[l])
     })
-    letterPitchNumb.addEventListener("input", () => {
-        const lpnValue = parseFloat(letterPitchNumb.value) || 0
-        if (window.pitchEditor.pitchNew[window.pitchEditor.letterFocus[0]]!=lpnValue) {
-            has_been_changed = true
-        }
-        window.pitchEditor.pitchNew[window.pitchEditor.letterFocus[0]] = lpnValue
-        sliders[window.pitchEditor.letterFocus[0]].value = letterPitchNumb.value
-        if (autoplay_ckbx.checked) {
-            generateVoiceButton.click()
-        }
-    })
-    letterPitchNumb.addEventListener("change", () => {
-        const lpnValue = parseFloat(letterPitchNumb.value) || 0
-        if (window.pitchEditor.pitchNew[window.pitchEditor.letterFocus[0]]!=lpnValue) {
-            has_been_changed = true
-        }
-        window.pitchEditor.pitchNew[window.pitchEditor.letterFocus[0]] = lpnValue
-        sliders[window.pitchEditor.letterFocus[0]].value = letterPitchNumb.value
-        if (autoplay_ckbx.checked) {
-            generateVoiceButton.click()
-        }
-    })
-
-    resetLetter_btn.addEventListener("click", () => {
-        if (window.pitchEditor.letterFocus.length==0) {
-            return
-        }
-
-        window.pitchEditor.letterFocus.forEach(l => {
-            if (window.pitchEditor.dursNew[l] != window.pitchEditor.resetDurs[l]) {
-                has_been_changed = true
-            }
-            window.pitchEditor.dursNew[l] = window.pitchEditor.resetDurs[l]
-            window.pitchEditor.pitchNew[l] = window.pitchEditor.resetPitch[l]
-            set_letter_display(letterElems[l], l, window.pitchEditor.resetDurs[l]*10+50, window.pitchEditor.pitchNew[l])
-        })
-
-        if (window.pitchEditor.letterFocus.length==1) {
-            letterLength.value = parseInt(window.pitchEditor.dursNew[window.pitchEditor.letterFocus[0]])
-            letterLengthNumb.value = parseInt(window.pitchEditor.dursNew[window.pitchEditor.letterFocus[0]])
-            letterPitchNumb.value = parseInt(window.pitchEditor.pitchNew[window.pitchEditor.letterFocus[0]]*1000)/1000
-        }
-
-        pace_slid.value = 1
-    })
-
-
 }
+
+
+letterPitchNumb.addEventListener("input", () => {
+    const lpnValue = parseFloat(letterPitchNumb.value) || 0
+    if (window.pitchEditor.pitchNew[window.pitchEditor.letterFocus[0]]!=lpnValue) {
+        has_been_changed = true
+    }
+    window.pitchEditor.pitchNew[window.pitchEditor.letterFocus[0]] = lpnValue
+    sliders[window.pitchEditor.letterFocus[0]].value = letterPitchNumb.value
+    if (autoplay_ckbx.checked) {
+        generateVoiceButton.click()
+    }
+})
+letterPitchNumb.addEventListener("change", () => {
+    const lpnValue = parseFloat(letterPitchNumb.value) || 0
+    if (window.pitchEditor.pitchNew[window.pitchEditor.letterFocus[0]]!=lpnValue) {
+        has_been_changed = true
+    }
+    window.pitchEditor.pitchNew[window.pitchEditor.letterFocus[0]] = lpnValue
+    sliders[window.pitchEditor.letterFocus[0]].value = letterPitchNumb.value
+    if (autoplay_ckbx.checked) {
+        generateVoiceButton.click()
+    }
+})
+
+resetLetter_btn.addEventListener("click", () => {
+    if (window.pitchEditor.letterFocus.length==0) {
+        return
+    }
+
+    window.pitchEditor.letterFocus.forEach(l => {
+        if (window.pitchEditor.dursNew[l] != window.pitchEditor.resetDurs[l]) {
+            has_been_changed = true
+        }
+        window.pitchEditor.dursNew[l] = window.pitchEditor.resetDurs[l]
+        window.pitchEditor.pitchNew[l] = window.pitchEditor.resetPitch[l]
+        set_letter_display(letterElems[l], l, window.pitchEditor.resetDurs[l]*10+50, window.pitchEditor.pitchNew[l])
+    })
+
+    if (window.pitchEditor.letterFocus.length==1) {
+        letterLength.value = parseInt(window.pitchEditor.dursNew[window.pitchEditor.letterFocus[0]])
+        letterLengthNumb.value = parseInt(window.pitchEditor.dursNew[window.pitchEditor.letterFocus[0]])
+        letterPitchNumb.value = parseInt(window.pitchEditor.pitchNew[window.pitchEditor.letterFocus[0]]*1000)/1000
+    }
+})
 const updateLetterLengthFromInput = () => {
     if (window.pitchEditor.dursNew[window.pitchEditor.letterFocus[0]] != letterLength.value) {
         has_been_changed = true
@@ -1088,6 +1094,7 @@ reset_btn.addEventListener("click", () => {
         letterLengthNumb.value = parseInt(window.pitchEditor.dursNew[window.pitchEditor.letterFocus[0]])
         letterPitchNumb.value = parseInt(window.pitchEditor.pitchNew[window.pitchEditor.letterFocus[0]]*1000)/1000
     }
+    pace_slid.value = 1
 })
 amplify_btn.addEventListener("click", () => {
     window.pitchEditor.ampFlatCounter += 1
@@ -1167,7 +1174,7 @@ autoplay_ckbx.addEventListener("change", () => {
     saveUserSettings()
 })
 
-vocoder_select.value = window.userSettings.vocoder
+vocoder_select.value = window.userSettings.vocoder.includes(".hg.") ? "qnd" : window.userSettings.vocoder
 const changeVocoder = vocoder => {
     window.userSettings.vocoder = vocoder
     spinnerModal("Changing models...")
@@ -1447,3 +1454,19 @@ if (fs.existsSync(`${path}/models/nvidia_waveglowpyt_fp32_20190427.pt`)) {
         window.errorModal("WaveGlow model not found. Download it also (separate download), and place the .pt file in the models folder.")
     }, 1500)
 }
+
+voiceSearchInput.addEventListener("keyup", () => {
+    const voiceElems = Array.from(voiceTypeContainer.children)
+    if (voiceSearchInput.value.length) {
+        voiceElems.forEach(elem => {
+            if (elem.innerHTML.toLowerCase().includes(voiceSearchInput.value)) {
+                elem.style.display="block"
+            } else {
+                elem.style.display="none"
+            }
+        })
+
+    } else {
+        voiceElems.forEach(elem => elem.style.display="block")
+    }
+})
