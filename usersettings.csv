@@ -1,2 +1,2 @@
 use_gpu,vocoder,hifi_gan
-True,qnd,False
+False,big_waveglow,False
